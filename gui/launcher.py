@@ -5,13 +5,25 @@ import time
 import os
 import threading
 import urllib.request
+import warnings
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QProgressBar, QMessageBox
 )
 from PyQt6.QtGui import QPixmap, QFont, QColor, QPalette
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QObject
 import qdarkstyle
 
+warnings.filterwarnings("ignore", category=UserWarning)
+
+# === Correction de PATH pour NodeJS ===
+NODE_PATHS = [
+    r"C:\Program Files\nodejs",
+    r"C:\Program Files (x86)\nodejs",
+    os.path.expandvars(r"%AppData%\npm")
+]
+for path in NODE_PATHS:
+    if os.path.exists(path):
+        os.environ["PATH"] += os.pathsep + path
 
 # === Vérification et installation automatique des dépendances Python ===
 def install_package(pkg_name):
@@ -26,14 +38,12 @@ def ensure_dependencies():
 
 ensure_dependencies()
 
-
 # === Définition des chemins de base ===
 BASE_DIR = os.path.dirname(__file__)
 BOT_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "bot", "index.js"))
 BOT_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "bot"))
 IMG_PATH = os.path.abspath(os.path.join(BASE_DIR, "assets", "images.png"))
 DASHBOARD_PATH = os.path.abspath(os.path.join(BASE_DIR, "dashboard.py"))
-
 
 # === Fonctions utilitaires ===
 def run_pip_install(package):
@@ -49,23 +59,25 @@ def check_node_installed():
     except Exception:
         return False
 
-def check_npm_installed():
-    try:
-        subprocess.check_output(["npm", "-v"])
-        return True
-    except Exception:
-        return False
+def check_npm_path():
+    candidates = [
+        r"C:\Program Files\nodejs\npm.cmd",
+        r"C:\Program Files\nodejs\npm",
+        r"C:\Program Files (x86)\nodejs\npm.cmd",
+        r"C:\Program Files (x86)\nodejs\npm",
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return None
 
-
-# === Installation automatique de Node.js si manquant ===
 def install_nodejs_silent(label_widget):
-    try:
-        # --- Vérifie si Node existe déjà ---
-        if check_node_installed() and check_npm_installed():
-            label_widget.setText("✅ Node.js déjà installé, passage à l'étape suivante...")
-            time.sleep(1)
-            return
+    if check_node_installed():
+        label_widget.setText("✅ Node.js déjà installé, passage à l'étape suivante...")
+        time.sleep(1)
+        return
 
+    try:
         node_installer = os.path.join(BASE_DIR, "node_installer.msi")
         node_url = "https://nodejs.org/dist/v22.11.0/node-v22.11.0-x64.msi"
 
@@ -79,21 +91,19 @@ def install_nodejs_silent(label_widget):
         )
 
         if result.returncode != 0:
-            raise Exception(
-                f"Le programme d'installation Node.js a renvoyé le code {result.returncode}. "
-                "Node est peut-être déjà installé ou une version incompatible est présente. "
-                "Désinstalle Node.js manuellement puis relance le launcher."
-            )
+            label_widget.setText("⚠️ Node.js semble déjà installé. Étape ignorée.")
+            time.sleep(1)
+            return
 
         os.remove(node_installer)
         label_widget.setText("✅ Node.js installé avec succès !")
         time.sleep(1)
 
     except Exception as e:
-        raise Exception(f"Échec de l'installation automatique de Node.js : {e}")
+        label_widget.setText("⚠️ Impossible de vérifier Node.js, poursuite de l'installation...")
+        print(f"[WARN] {e}")
+        time.sleep(1)
 
-
-# === Vérification structure ===
 def check_directories():
     missing = []
     required_dirs = [
@@ -104,6 +114,51 @@ def check_directories():
         if not os.path.exists(d):
             missing.append(d)
     return missing
+
+
+# === Thread de travail ===
+class InstallerWorker(QObject):
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+    progress = pyqtSignal(int, str)
+
+    def run(self):
+        try:
+            self.progress.emit(0, "Initialisation...")
+            if not check_node_installed():
+                self.progress.emit(0, "Installation de Node.js...")
+                install_nodejs_silent(self)
+            else:
+                self.progress.emit(10, "✅ Node.js déjà présent")
+
+            npm_path = check_npm_path()
+            if not npm_path:
+                raise Exception("❌ npm introuvable. Vérifie ton installation de Node.js.")
+
+            steps = [
+                ("Vérification de PyQt6", lambda: run_pip_install("PyQt6")),
+                ("Vérification de qdarkstyle", lambda: run_pip_install("qdarkstyle")),
+                ("Installation de discord.js", lambda: subprocess.run(
+                    f'"{npm_path}" install discord.js --prefix "{BOT_DIR}"',
+                    shell=True, check=True
+                )),
+                ("Installation de express", lambda: subprocess.run(
+                    f'"{npm_path}" install express --prefix "{BOT_DIR}"',
+                    shell=True, check=True
+                )),
+            ]
+
+            for i, (text, func) in enumerate(steps, 1):
+                self.progress.emit(int(i * 20), text)
+                func()
+                time.sleep(0.3)
+
+            self.progress.emit(100, "✅ Installation terminée !")
+            time.sleep(0.5)
+            self.finished.emit()
+
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 # === Fenêtre principale ===
@@ -159,16 +214,12 @@ class MenuWindow(QWidget):
 
 # === Fenêtre de chargement ===
 class LoaderWindow(QWidget):
-    # Signaux pour interagir avec l'UI depuis le thread d'installation
-    show_info_signal = pyqtSignal(str, str, str)   # (titre, message, mode)
-    show_error_signal = pyqtSignal(str, str)
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Installation des dépendances")
         self.resize(500, 200)
-        layout = QVBoxLayout()
 
+        layout = QVBoxLayout()
         self.label = QLabel("Préparation du système...")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label)
@@ -178,95 +229,41 @@ class LoaderWindow(QWidget):
         layout.addWidget(self.progress)
 
         self.setLayout(layout)
-        self.percent = 0
-        self.error_happened = False
+        self.thread = QThread()
+        self.worker = InstallerWorker()
+        self.worker.moveToThread(self.thread)
 
-        # Connecte les signaux
-        self.show_info_signal.connect(self._show_info)
-        self.show_error_signal.connect(self._show_error)
+        self.thread.started.connect(self.worker.run)
+        self.worker.progress.connect(self.update_progress)
+        self.worker.finished.connect(self.installation_finished)
+        self.worker.error.connect(self.installation_failed)
 
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_progress)
-        self.timer.start(60)
+        self.thread.start()
 
-        # Lancement de l'installation dans un thread séparé
-        threading.Thread(target=self.install_dependencies, daemon=True).start()
+    def update_progress(self, value, text):
+        self.progress.setValue(value)
+        self.label.setText(text)
 
-    # --- Affichage thread-safe ---
-    def _show_info(self, title, message, mode):
-        if mode == "info":
-            QMessageBox.information(self, title, message)
-        elif mode == "warning":
-            QMessageBox.warning(self, title, message)
-        elif mode == "critical":
-            QMessageBox.critical(self, title, message)
-
-    def _show_error(self, title, message):
-        QMessageBox.critical(self, title, message)
-
-    # --- Processus principal d'installation ---
-    def install_dependencies(self):
-        try:
-            print("=== DEBUG: Début installation ===")
-
-            # Vérifie si Node est présent
-            node_ok = check_node_installed()
-            npm_ok = check_npm_installed()
-
-            if not node_ok or not npm_ok:
-                self.show_info_signal.emit("Installation automatique",
-                    "Node.js n'est pas détecté.\nIl va être téléchargé et installé automatiquement.\nMerci de lancer le launcher en administrateur.",
-                    "info")
-                install_nodejs_silent(self.label)
-            else:
-                self.label.setText("✅ Node.js détecté, passage à l'étape suivante...")
-
-            steps = [
-                ("Vérification de PyQt6", lambda: run_pip_install("PyQt6")),
-                ("Vérification de qdarkstyle", lambda: run_pip_install("qdarkstyle")),
-                ("Installation de discord.js", lambda: subprocess.check_call(
-                    ["npm", "install", "discord.js", "--prefix", BOT_DIR])),
-                ("Installation de express", lambda: subprocess.check_call(
-                    ["npm", "install", "express", "--prefix", BOT_DIR])),
-            ]
-
-            for i, (text, func) in enumerate(steps, 1):
-                print(f"➡️ Étape {i}/{len(steps)} : {text}")
-                self.label.setText(text)
-                func()
-                time.sleep(0.3)
-                self.percent = int((i / len(steps)) * 100)
-                print(f"✅ Terminé : {text}")
-
-            self.percent = 100
-            time.sleep(0.5)
-            self.open_dashboard()
-
-        except Exception as e:
-            print(f"❌ Erreur attrapée : {e}")
-            self.error_happened = True
-            self.label.setText("❌ Erreur pendant l'installation")
-            self.show_error_signal.emit("Erreur critique", str(e))
-
-    def update_progress(self):
-        if not self.error_happened:
-            if self.percent < 100:
-                self.percent = min(100, self.percent + 1)
-                self.progress.setValue(self.percent)
-            else:
-                self.timer.stop()
-        else:
-            self.timer.stop()
-
-    def _show_error(self, title, message):
-        QMessageBox.critical(self, title, message)
-
-    def open_dashboard(self):
+    def installation_finished(self):
         self.label.setText("Démarrage du tableau de bord...")
+        self.progress.setValue(100)
+        QApplication.processEvents()
+        time.sleep(0.5)
+
         try:
             subprocess.Popen([sys.executable, DASHBOARD_PATH])
         except Exception as e:
-            QMessageBox.critical(self, "Erreur", str(e))
+            QMessageBox.critical(self, "Erreur", f"Impossible de lancer le dashboard : {e}")
+
+        self.thread.quit()
+        self.thread.wait()
+        self.close()
+        self.deleteLater()
+
+    def installation_failed(self, message):
+        QMessageBox.critical(self, "Erreur critique", message)
+        self.thread.quit()
+        self.thread.wait()
         self.close()
 
 
