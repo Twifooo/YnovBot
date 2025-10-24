@@ -18,7 +18,7 @@ bot_process = None
 class Dashboard(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HelperBot Dashboard")
+        self.setWindowTitle("YnovBot Dashboard")
         self.setGeometry(100, 100, 1000, 600)
         self.setStyleSheet(qdarkstyle.load_stylesheet())
 
@@ -32,7 +32,7 @@ class Dashboard(QWidget):
 
         self.show_animation()
 
-    # === Animations d'apparition ===
+    # === Fade-in animation ===
     def show_animation(self):
         opacity = QGraphicsOpacityEffect()
         self.setGraphicsEffect(opacity)
@@ -49,7 +49,7 @@ class Dashboard(QWidget):
         frame.setStyleSheet("background-color: #202225; border-right: 2px solid #2f3136;")
         layout = QVBoxLayout(frame)
 
-        title = QLabel("⚙️ HelperBot")
+        title = QLabel("⚙️ YnovBot")
         title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         title.setStyleSheet("color: white; margin-bottom: 20px;")
         layout.addWidget(title, alignment=Qt.AlignmentFlag.AlignHCenter)
@@ -57,7 +57,11 @@ class Dashboard(QWidget):
         buttons = [
             ("🏠 Dashboard", self.show_dashboard),
             ("📜 Logs", self.show_logs),
-            ("⚙️ Paramètres", self.show_settings)
+            ("💬 Messages", self.show_messages),
+            ("🧮 Calculator", self.show_calculator),
+            ("🎮 Games", self.show_games),
+            ("🧾 Commands", self.show_commands),
+            ("⚙️ Settings", self.show_settings)
         ]
 
         for text, action in buttons:
@@ -83,21 +87,21 @@ class Dashboard(QWidget):
         layout.addStretch(1)
         return frame
 
-    # === Contenu principal ===
+    # === Main content area ===
     def create_main_content(self):
         stack = QStackedWidget()
 
-        # Page Dashboard
+        # === Dashboard page ===
         dash = QWidget()
         dash_layout = QVBoxLayout(dash)
 
-        self.status_label = QLabel("🔴 Bot arrêté")
+        self.status_label = QLabel("🔴 YnovBot is stopped")
         self.status_label.setFont(QFont("Segoe UI", 14))
         dash_layout.addWidget(self.status_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         btn_layout = QHBoxLayout()
-        start_btn = QPushButton("▶️ Lancer le bot")
-        stop_btn = QPushButton("🛑 Arrêter le bot")
+        start_btn = QPushButton("▶️ Start YnovBot")
+        stop_btn = QPushButton("🛑 Stop YnovBot")
 
         for btn, color in [(start_btn, "#43b581"), (stop_btn, "#f04747")]:
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -122,7 +126,7 @@ class Dashboard(QWidget):
         dash_layout.addLayout(btn_layout)
         stack.addWidget(dash)
 
-        # Page Logs
+        # === Logs page ===
         logs = QWidget()
         logs_layout = QVBoxLayout(logs)
         self.log_box = QTextEdit()
@@ -131,45 +135,77 @@ class Dashboard(QWidget):
         logs_layout.addWidget(self.log_box)
         stack.addWidget(logs)
 
-        # Page Paramètres
+        # === Messages page ===
+        msg_page = QWidget()
+        msg_layout = QVBoxLayout(msg_page)
+        msg_layout.addWidget(QLabel("💬 Message system (coming soon...)"))
+        stack.addWidget(msg_page)
+
+        # === Calculator page ===
+        calc_page = QWidget()
+        calc_layout = QVBoxLayout(calc_page)
+        calc_layout.addWidget(QLabel("🧮 Calculator feature (coming soon...)"))
+        stack.addWidget(calc_page)
+
+        # === Games page ===
+        games_page = QWidget()
+        games_layout = QVBoxLayout(games_page)
+        games_layout.addWidget(QLabel("🎮 Mini games (coming soon...)"))
+        stack.addWidget(games_page)
+
+        # === Commands page ===
+        cmds_page = QWidget()
+        cmds_layout = QVBoxLayout(cmds_page)
+        cmds_layout.addWidget(QLabel("🧾 Command manager (coming soon...)"))
+        stack.addWidget(cmds_page)
+
+        # === Settings page ===
         settings = QWidget()
         settings_layout = QVBoxLayout(settings)
-        settings_layout.addWidget(QLabel("⚙️ Paramètres à venir..."))
+        settings_layout.addWidget(QLabel("⚙️ Settings (coming soon...)"))
         stack.addWidget(settings)
 
-        self.pages = {"dashboard": 0, "logs": 1, "settings": 2}
+        self.pages = {
+            "dashboard": 0,
+            "logs": 1,
+            "messages": 2,
+            "calculator": 3,
+            "games": 4,
+            "commands": 5,
+            "settings": 6
+        }
+
         self.stack = stack
         return stack
 
-    # === Navigation entre pages ===
-    def show_dashboard(self):
-        self.stack.setCurrentIndex(self.pages["dashboard"])
+    # === Page navigation ===
+    def show_dashboard(self): self.stack.setCurrentIndex(self.pages["dashboard"])
+    def show_logs(self): self.stack.setCurrentIndex(self.pages["logs"])
+    def show_messages(self): self.stack.setCurrentIndex(self.pages["messages"])
+    def show_calculator(self): self.stack.setCurrentIndex(self.pages["calculator"])
+    def show_games(self): self.stack.setCurrentIndex(self.pages["games"])
+    def show_commands(self): self.stack.setCurrentIndex(self.pages["commands"])
+    def show_settings(self): self.stack.setCurrentIndex(self.pages["settings"])
 
-    def show_logs(self):
-        self.stack.setCurrentIndex(self.pages["logs"])
-
-    def show_settings(self):
-        self.stack.setCurrentIndex(self.pages["settings"])
-
-    # === Gestion du bot ===
+    # === Bot control ===
     def start_bot(self):
         global bot_process
         if bot_process is not None:
-            self.status_label.setText("⚠️ Bot déjà lancé")
+            self.status_label.setText("⚠️ YnovBot is already running.")
             return
 
-        self.status_label.setText("🟢 Bot en cours de démarrage...")
+        self.status_label.setText("🟢 Starting YnovBot...")
         bot_process = subprocess.Popen(["node", BOT_PATH], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-        QTimer.singleShot(2000, lambda: self.status_label.setText("🟢 Bot en ligne"))
+        QTimer.singleShot(2000, lambda: self.status_label.setText("🟢 YnovBot is online"))
         QTimer.singleShot(1000, self.update_logs)
 
     def stop_bot(self):
         global bot_process
         if bot_process is None:
-            self.status_label.setText("⚠️ Aucun bot à arrêter.")
+            self.status_label.setText("⚠️ No YnovBot instance running.")
             return
 
-        self.status_label.setText("🛑 Arrêt en cours...")
+        self.status_label.setText("🛑 Stopping YnovBot...")
         try:
             os.system("curl -X POST http://localhost:3000/shutdown")
             time.sleep(3)
@@ -180,11 +216,11 @@ class Dashboard(QWidget):
             if bot_process.poll() is None:
                 os.system(f"taskkill /PID {bot_process.pid} /F")
             bot_process = None
-            self.status_label.setText("🔴 Bot arrêté")
+            self.status_label.setText("🔴 YnovBot stopped")
         except Exception as e:
-            self.status_label.setText(f"❌ Erreur : {e}")
+            self.status_label.setText(f"❌ Error: {e}")
 
-    # === Lecture des logs ===
+    # === Log reading ===
     def update_logs(self):
         if os.path.exists(LOG_PATH):
             try:
@@ -196,7 +232,7 @@ class Dashboard(QWidget):
         QTimer.singleShot(2000, self.update_logs)
 
 
-# === Lancement de l'app ===
+# === Launch the dashboard ===
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = Dashboard()

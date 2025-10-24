@@ -165,7 +165,7 @@ class InstallerWorker(QObject):
 class MenuWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("HelperBot - Lanceur")
+        self.setWindowTitle("YnovBot - Launcher")
         self.resize(600, 400)
         pal = self.palette()
         pal.setColor(QPalette.ColorRole.Window, QColor("#d3d3d3"))
@@ -184,7 +184,7 @@ class MenuWindow(QWidget):
             lbl.setStyleSheet("color:red;font-weight:bold;")
             layout.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        title = QLabel("HelperBot Launcher")
+        title = QLabel("YnovBot Launcher")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         layout.addWidget(title)
