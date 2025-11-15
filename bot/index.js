@@ -1,13 +1,15 @@
 // =============================
-// HelperBot - Fichier principal
+// YnovBot - Main file
 // =============================
 
 const { Client, GatewayIntentBits } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
+const express = require("express");
+const bodyParser = require("body-parser");
 const config = require("./config.json");
 
-// Création du client Discord avec les intents nécessaires
+// Create Discord client
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -16,99 +18,163 @@ const client = new Client({
   ]
 });
 
-// === Fonction de log ===
-function log(msg) {
-  const entry = `[${new Date().toISOString()}] ${msg}\n`;
-  fs.appendFileSync(path.join(__dirname, "logs", "bot.log"), entry);
-  console.log(entry.trim());
+// -------------------------------------------
+// Simple logger (file + console)
+// -------------------------------------------
+function log(text) {
+  const line = `[${new Date().toISOString()}] ${text}\n`;
+  const logPath = path.join(__dirname, "logs", "bot.log");
+  fs.appendFileSync(logPath, line);
+  console.log(line.trim());
 }
 
-// === Chargement des commandes ===
-const commands = new Map();
-const commandFiles = fs.existsSync(path.join(__dirname, "commands"))
-  ? fs.readdirSync(path.join(__dirname, "commands"))
-  : [];
-
-for (const file of commandFiles) {
-  const cmd = require(`./commands/${file}`);
-  commands.set(cmd.name, cmd);
-}
-
-// === Événement : prêt ===
+// -------------------------------------------
+// Ready event
+// -------------------------------------------
 client.once("ready", async () => {
-  log(`[INFO] Connecté en tant que ${client.user.tag}`);
+  log(`[INFO] Logged in as ${client.user.tag}`);
+
   try {
     const consoleChannel = await client.channels.fetch(config.channels.console);
-    if (consoleChannel) {
-      await consoleChannel.send(`✅ **${client.user.username} est maintenant en ligne !**`);
-    }
-  } catch (err) {
-    log(`[ERROR] Impossible d'envoyer le message de démarrage : ${err.message}`);
+    await consoleChannel.send(`✅ **${client.user.username} is now online!**`);
+  } catch {
+    log("[WARN] Could not send startup message.");
   }
+
+  console.log("Bot ready. API active.");
 });
 
-// === Événement : nouveau message ===
+// -------------------------------------------
+// PREFIX Commands (only in commands channel)
+// -------------------------------------------
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
-  // Vérifie si c’est une commande avec le préfixe
-  if (!message.content.startsWith(config.settings.prefix)) return;
-  const args = message.content.slice(config.settings.prefix.length).trim().split(/ +/);
-  const command = args.shift().toLowerCase();
+  const prefix = config.settings.prefix;
+  if (!message.content.startsWith(prefix)) return;
 
-  // --- Commande de déconnexion / arrêt ---
-  if (command === "disconnect" || command === "stop") {
-    if (!message.member.roles.cache.has(config.roles.admin)) {
-      return message.reply("❌ Tu n’as pas la permission de déconnecter le bot.");
-    }
+  // Parse command
+  const parts = message.content.slice(prefix.length).trim().split(/ +/);
+  const command = parts.shift().toLowerCase();
 
+  // Global rule → all prefix commands only in "commands" channel
+  if (message.channel.id !== config.channels.commands) {
+    return message.reply("❌ Commands are only allowed in the commands channel.");
+  }
+
+// ---------------------------------------
+// STOP COMMAND (admin only)
+// ---------------------------------------
+if (command === "stop" || command === "disconnect") {
+
+  // Commands allowed only in commands channel
+  if (message.channel.id !== config.channels.commands) {
+    return message.reply("❌ You can only use this command in the commands channel.");
+  }
+
+  // Must be admin
+  if (!message.member.roles.cache.has(config.roles.admin)) {
+    return message.reply("❌ You do not have permission to stop the bot.");
+  }
+
+  // Send shutdown info to console channel
+  try {
     const consoleChannel = await client.channels.fetch(config.channels.console);
     if (consoleChannel) {
-      await consoleChannel.send(`🛑 **${client.user.username} va se déconnecter (commande Discord)**`);
+      await consoleChannel.send(
+        `🛑 **${client.user.username} is shutting down (requested by ${message.author.tag})**`
+      );
     }
-
-    log(`[SYSTEM] Bot arrêté via Discord par ${message.author.tag}`);
-    await message.reply("🔴 Déconnexion du bot dans 3 secondes...");
-
-    setTimeout(async () => {
-      await client.destroy();
-      process.exit(0);
-    }, 3000);
-
-    return;
+  } catch (err) {
+    log("[WARN] Could not send shutdown message to console channel.");
   }
 
-  // --- Autres commandes (calculator, games, message, etc.) ---
-  const channelId = message.channel.id;
+  // Reply in commands channel
+  await message.reply("🔴 Bot shutting down in 3 seconds...");
 
-  if (channelId === config.channels.calculator && commands.has("calculator")) {
-    return commands.get("calculator").execute(client, message, args, log, config);
+  log(`[SYSTEM] Bot stopped by ${message.author.tag}`);
+
+  setTimeout(() => {
+    client.destroy();
+    process.exit(0);
+  }, 3000);
+
+  return;
+}
+
+  // ---------------------------------------
+  // !help
+  // ---------------------------------------
+  if (command === "help") {
+    return message.reply(
+      "📌 **Available commands:**\n" +
+      "`!help` - Show this help\n" +
+      "`!stop` - Stop the bot (admin only)\n"
+    );
   }
 
-  if (channelId === config.channels.message && commands.has("message")) {
-    return commands.get("message").execute(client, message, args, log, config);
-  }
-
-  if (channelId === config.channels.games && commands.has("games")) {
-    return commands.get("games").execute(client, message, args, log, config);
-  }
-
-  if (channelId === config.channels.commandes) {
-    if (command === "help") {
-      message.reply("📜 Commandes disponibles : `!disconnect`, `!calc`, `!guess`, `!announce`");
-      log(`[CMD] !help utilisé par ${message.author.tag}`);
-    }
-  }
 });
 
-// === Gestion des erreurs ===
+// -------------------------------------------
+// ERROR HANDLERS
+// -------------------------------------------
 client.on("error", (err) => log(`[ERROR] ${err.message}`));
 client.on("warn", (warn) => log(`[WARN] ${warn}`));
 
-// === Lancement de l’API Express (pour ton interface Python) ===
-require("./api")(client, log);
+// -------------------------------------------
+// SIMPLE API FOR DASHBOARD (messages + shutdown)
+// -------------------------------------------
+const app = express();
+app.use(bodyParser.json());
 
-// === Connexion du bot ===
-client.login(config.token).catch((err) => {
-  log(`[ERROR] Échec de connexion : ${err.message}`);
+// Return messages from "message" channel
+app.get("/messages", async (req, res) => {
+  try {
+    const channel = await client.channels.fetch(config.channels.message);
+    const msgs = await channel.messages.fetch({ limit: 25 });
+
+    const data = msgs.reverse().map(msg => ({
+      author: msg.author.username,
+      content: msg.content
+    }));
+
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Could not load messages." });
+  }
+});
+
+// Send message to "message" channel
+app.post("/messages/send", async (req, res) => {
+  const text = req.body.text;
+
+  if (!text || text.trim() === "") {
+    return res.status(400).json({ error: "Message is empty." });
+  }
+
+  try {
+    const channel = await client.channels.fetch(config.channels.message);
+    await channel.send(text);
+    res.json({ status: "sent" });
+  } catch {
+    res.status(500).json({ error: "Could not send message." });
+  }
+});
+
+// Shutdown API (used by dashboard)
+app.post("/shutdown", (req, res) => {
+  res.json({ status: "ok" });
+
+  setTimeout(() => {
+    client.destroy();
+    process.exit(0);
+  }, 1000);
+});
+
+// Start HTTP server
+app.listen(3000, () => console.log("API running on port 3000"));
+
+// Login bot
+client.login(config.token).catch(err => {
+  log(`[ERROR] Login failed: ${err.message}`);
 });

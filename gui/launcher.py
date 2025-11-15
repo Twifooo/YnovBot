@@ -3,120 +3,67 @@ import subprocess
 import importlib.util
 import time
 import os
-import threading
 import urllib.request
 import warnings
+
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QProgressBar, QMessageBox
+    QApplication, QWidget, QLabel, QPushButton,
+    QVBoxLayout, QProgressBar, QMessageBox
 )
 from PyQt6.QtGui import QPixmap, QFont, QColor, QPalette
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread, QObject
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QObject
 import qdarkstyle
+
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# === Correction de PATH pour NodeJS ===
-NODE_PATHS = [
-    r"C:\Program Files\nodejs",
-    r"C:\Program Files (x86)\nodejs",
-    os.path.expandvars(r"%AppData%\npm")
-]
-for path in NODE_PATHS:
-    if os.path.exists(path):
-        os.environ["PATH"] += os.pathsep + path
+# === Portable paths ===
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))      # gui/
+ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, ".."))   # root project
 
-# === Vérification et installation automatique des dépendances Python ===
-def install_package(pkg_name):
-    print(f"🔧 Installation de {pkg_name}...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg_name, "--quiet"])
+BOT_DIR = os.path.join(ROOT_DIR, "bot")
+DASHBOARD_PATH = os.path.join(CURRENT_DIR, "dashboard.py")
+IMG_PATH = os.path.join(CURRENT_DIR, "assets", "images.png")
 
-def ensure_dependencies():
+
+# === Python dependency check ===
+def install_python_package(name):
+    print(f"Installing {name}...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", name])
+
+
+def ensure_python_dependencies():
     required = ["PyQt6", "qdarkstyle"]
     for pkg in required:
         if importlib.util.find_spec(pkg) is None:
-            install_package(pkg)
+            install_python_package(pkg)
 
-ensure_dependencies()
 
-# === Définition des chemins de base ===
-BASE_DIR = os.path.dirname(__file__)
-BOT_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "bot", "index.js"))
-BOT_DIR = os.path.abspath(os.path.join(BASE_DIR, "..", "bot"))
-IMG_PATH = os.path.abspath(os.path.join(BASE_DIR, "assets", "images.png"))
-DASHBOARD_PATH = os.path.abspath(os.path.join(BASE_DIR, "dashboard.py"))
+ensure_python_dependencies()
 
-# === Fonctions utilitaires ===
-def run_pip_install(package):
-    try:
-        __import__(package)
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
-def check_node_installed():
+# === Node.js & npm utils ===
+def node_available():
     try:
         subprocess.check_output(["node", "-v"])
         return True
-    except Exception:
+    except:
         return False
 
-def check_npm_path():
+
+def find_npm():
     candidates = [
         r"C:\Program Files\nodejs\npm.cmd",
-        r"C:\Program Files\nodejs\npm",
         r"C:\Program Files (x86)\nodejs\npm.cmd",
-        r"C:\Program Files (x86)\nodejs\npm",
+        os.path.expandvars(r"%AppData%\npm\npm.cmd")
     ]
     for c in candidates:
         if os.path.exists(c):
             return c
     return None
 
-def install_nodejs_silent(label_widget):
-    if check_node_installed():
-        label_widget.setText("✅ Node.js déjà installé, passage à l'étape suivante...")
-        time.sleep(1)
-        return
 
-    try:
-        node_installer = os.path.join(BASE_DIR, "node_installer.msi")
-        node_url = "https://nodejs.org/dist/v22.11.0/node-v22.11.0-x64.msi"
-
-        label_widget.setText("📦 Téléchargement de Node.js...")
-        urllib.request.urlretrieve(node_url, node_installer)
-
-        label_widget.setText("⚙️ Installation de Node.js (1 à 2 min)...")
-        result = subprocess.run(
-            ["msiexec", "/i", node_installer, "/quiet", "/norestart"],
-            capture_output=True, text=True
-        )
-
-        if result.returncode != 0:
-            label_widget.setText("⚠️ Node.js semble déjà installé. Étape ignorée.")
-            time.sleep(1)
-            return
-
-        os.remove(node_installer)
-        label_widget.setText("✅ Node.js installé avec succès !")
-        time.sleep(1)
-
-    except Exception as e:
-        label_widget.setText("⚠️ Impossible de vérifier Node.js, poursuite de l'installation...")
-        print(f"[WARN] {e}")
-        time.sleep(1)
-
-def check_directories():
-    missing = []
-    required_dirs = [
-        BOT_DIR,
-        os.path.join(BASE_DIR, "assets")
-    ]
-    for d in required_dirs:
-        if not os.path.exists(d):
-            missing.append(d)
-    return missing
-
-
-# === Thread de travail ===
+# === Thread worker ===
 class InstallerWorker(QObject):
     finished = pyqtSignal()
     error = pyqtSignal(str)
@@ -124,36 +71,39 @@ class InstallerWorker(QObject):
 
     def run(self):
         try:
-            self.progress.emit(0, "Initialisation...")
-            if not check_node_installed():
-                self.progress.emit(0, "Installation de Node.js...")
-                install_nodejs_silent(self)
+
+            self.progress.emit(0, "Checking environment...")
+
+            # Node.js
+            if not node_available():
+                self.progress.emit(5, "Node.js missing. Please install it manually.")
+                time.sleep(1)
             else:
-                self.progress.emit(10, "✅ Node.js déjà présent")
+                self.progress.emit(15, "Node.js detected.")
 
-            npm_path = check_npm_path()
-            if not npm_path:
-                raise Exception("❌ npm introuvable. Vérifie ton installation de Node.js.")
+            # npm
+            npm = find_npm()
+            if npm is None:
+                raise Exception("npm not found. Check Node.js installation.")
 
+            # Python modules
+            self.progress.emit(30, "Checking Python modules...")
+            ensure_python_dependencies()
+
+            # Node modules
             steps = [
-                ("Vérification de PyQt6", lambda: run_pip_install("PyQt6")),
-                ("Vérification de qdarkstyle", lambda: run_pip_install("qdarkstyle")),
-                ("Installation de discord.js", lambda: subprocess.run(
-                    f'"{npm_path}" install discord.js --prefix "{BOT_DIR}"',
-                    shell=True, check=True
-                )),
-                ("Installation de express", lambda: subprocess.run(
-                    f'"{npm_path}" install express --prefix "{BOT_DIR}"',
-                    shell=True, check=True
-                )),
+                ("Installing discord.js...", f'"{npm}" install discord.js --prefix "{BOT_DIR}"'),
+                ("Installing express...", f'"{npm}" install express --prefix "{BOT_DIR}"'),
             ]
 
-            for i, (text, func) in enumerate(steps, 1):
-                self.progress.emit(int(i * 20), text)
-                func()
-                time.sleep(0.3)
+            p = 45
+            for text, cmd in steps:
+                self.progress.emit(p, text)
+                subprocess.run(cmd, shell=True, check=True)
+                p += 25
+                time.sleep(0.4)
 
-            self.progress.emit(100, "✅ Installation terminée !")
+            self.progress.emit(100, "Installation complete.")
             time.sleep(0.5)
             self.finished.emit()
 
@@ -161,116 +111,128 @@ class InstallerWorker(QObject):
             self.error.emit(str(e))
 
 
-# === Fenêtre principale ===
-class MenuWindow(QWidget):
+# === Launcher window ===
+class Launcher(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("YnovBot - Launcher")
+
+        self.setWindowTitle("YnovBot Launcher")
         self.resize(600, 400)
-        pal = self.palette()
-        pal.setColor(QPalette.ColorRole.Window, QColor("#d3d3d3"))
-        self.setPalette(pal)
 
-        layout = QVBoxLayout()
+        bg = self.palette()
+        bg.setColor(QPalette.Window, QColor("#d3d3d3"))
+        self.setPalette(bg)
 
+        layout = QVBoxLayout(self)
+
+        # Logo
         if os.path.exists(IMG_PATH):
-            pix = QPixmap(IMG_PATH)
+            img = QPixmap(IMG_PATH)
             logo = QLabel()
-            logo.setPixmap(pix.scaled(180, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-            logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            logo.setPixmap(img.scaled(180, 180, Qt.KeepAspectRatio))
+            logo.setAlignment(Qt.AlignCenter)
             layout.addWidget(logo)
         else:
-            lbl = QLabel("⚠️ Logo non trouvé : /gui/assets/images.png")
+            lbl = QLabel("⚠ Image missing (gui/assets/images.png)")
             lbl.setStyleSheet("color:red;font-weight:bold;")
-            layout.addWidget(lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+            lbl.setAlignment(Qt.AlignCenter)
+            layout.addWidget(lbl)
 
         title = QLabel("YnovBot Launcher")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setAlignment(Qt.AlignCenter)
         title.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
         layout.addWidget(title)
 
-        self.start_btn = QPushButton("🚀 Lancer l'installation")
-        self.start_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
-        self.start_btn.setStyleSheet(
-            "QPushButton {background:#5865F2;color:white;border-radius:8px;padding:10px;} "
-            "QPushButton:hover{background:#4752C4;}"
-        )
-        self.start_btn.clicked.connect(self.launch_loader)
-        layout.addWidget(self.start_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        btn = QPushButton("Start installation")
+        btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        btn.setStyleSheet("""
+            QPushButton {
+                background:#5865F2;
+                color:white;
+                border-radius:8px;
+                padding:10px;
+            }
+            QPushButton:hover { background:#4752C4; }
+        """)
 
-        self.setLayout(layout)
+        btn.clicked.connect(self.start_installation)
+        layout.addWidget(btn, alignment=Qt.AlignCenter)
 
-    def launch_loader(self):
-        missing = check_directories()
+    def start_installation(self):
+        # Basic folder checks
+        required = [BOT_DIR, os.path.join(CURRENT_DIR, "assets")]
+        missing = [d for d in required if not os.path.exists(d)]
+
         if missing:
-            msg = "Certains dossiers sont manquants :\n" + "\n".join(missing)
-            QMessageBox.critical(self, "Erreur de structure", msg)
+            QMessageBox.critical(self, "Structure error",
+                                 "Required folders missing:\n" + "\n".join(missing))
             return
 
         self.loader = LoaderWindow()
         self.loader.show()
-        self.close()
+        self.hide()  # Don't close: avoid thread crash
 
 
-# === Fenêtre de chargement ===
+# === Loader window ===
 class LoaderWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Installation des dépendances")
-        self.resize(500, 200)
 
-        layout = QVBoxLayout()
-        self.label = QLabel("Préparation du système...")
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setWindowTitle("Installing dependencies...")
+        self.resize(500, 220)
+
+        layout = QVBoxLayout(self)
+
+        self.label = QLabel("Preparing...")
+        self.label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.label)
 
         self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
         layout.addWidget(self.progress)
 
-        self.setLayout(layout)
+        # Thread setup
         self.thread = QThread()
         self.worker = InstallerWorker()
         self.worker.moveToThread(self.thread)
 
+        self.worker.progress.connect(self.update_status)
+        self.worker.finished.connect(self.install_finished)
+        self.worker.error.connect(self.install_failed)
         self.thread.started.connect(self.worker.run)
-        self.worker.progress.connect(self.update_progress)
-        self.worker.finished.connect(self.installation_finished)
-        self.worker.error.connect(self.installation_failed)
 
         self.thread.start()
 
-    def update_progress(self, value, text):
+    def update_status(self, value, text):
         self.progress.setValue(value)
         self.label.setText(text)
 
-    def installation_finished(self):
-        self.label.setText("Démarrage du tableau de bord...")
-        self.progress.setValue(100)
+    def install_finished(self):
+        self.label.setText("Launching dashboard...")
         QApplication.processEvents()
-        time.sleep(0.5)
+        time.sleep(0.4)
 
         try:
             subprocess.Popen([sys.executable, DASHBOARD_PATH])
         except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Impossible de lancer le dashboard : {e}")
+            QMessageBox.critical(self, "Error", str(e))
 
         self.thread.quit()
-        self.thread.wait()
+        self.thread.wait()  # CRITICAL FIX
         self.close()
-        self.deleteLater()
 
-    def installation_failed(self, message):
-        QMessageBox.critical(self, "Erreur critique", message)
+    def install_failed(self, msg):
+        QMessageBox.critical(self, "Installation failed", msg)
         self.thread.quit()
-        self.thread.wait()
+        self.thread.wait()  # CRITICAL FIX
         self.close()
 
 
-# === Lancement principal ===
+# === Entry point ===
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyleSheet(qdarkstyle.load_stylesheet())
-    win = MenuWindow()
-    win.show()
+
+    window = Launcher()
+    window.show()
+
     sys.exit(app.exec())
