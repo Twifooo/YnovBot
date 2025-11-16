@@ -48,7 +48,7 @@ In the message tab, you can read and send messages.<br>
 - Settings.<br>
 
 # Installation prerequisites :
-- Clone the project : git clone https://github.com/<your-username>/YnovBot.git<br>
+- Clone the project : git clone https://github.com/Twifooo/YnovBot.git<br>
 - Install Node.js<br>
 - npm install discord.js express<br>
 - Install Python 3.7<br>
