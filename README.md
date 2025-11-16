@@ -43,8 +43,9 @@ In the message tab, you can read and send messages.<br>
 # TO SEE COMMANDS : !help
 
 # To DO :
-- Games.<br>
 - Calculator.<br>
+- Games.<br>
+- Command manager.<br>
 - Settings.<br>
 
 # Installation prerequisites :
@@ -55,8 +56,8 @@ In the message tab, you can read and send messages.<br>
 - pip install PyQt6 qdarkstyle<br>
 
 # Run the program
-- Python graphical interface : python launcher.py<br>
-- The bot : node bot/index.js<br>
+- open interface in C:\Users\...\YnovBot\gui
+- in the interface enter : python launcher.py<br>
 
 # Additional information
 The Discord token cannot be included on GitHub for security reasons.<br>
